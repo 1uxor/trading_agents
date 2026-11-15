@@ -1,0 +1,24 @@
+id: demo-rsi-01
+name: RSI Hunter
+color: "#E74C3C"
+symbols:
+  - EURUSD
+timeframe: H1
+model_provider: no_model
+model_config: {}
+strategies:
+  - name: rsi_reversion
+    params:
+      rsi_period: 14
+      oversold: 30
+      overbought: 70
+      atr_sl_mult: 1.5
+      atr_tp_mult: 2.0
+combiner: null
+risk_profile:
+  max_risk_per_trade_pct: 1.0
+  max_open_positions: 3
+  max_lot_size: 0.1
+  max_daily_loss_pct: 5.0
+schedule_seconds: 60
+enabled: true
