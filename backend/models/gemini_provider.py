@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class GeminiProvider(ModelProvider):
     name = "gemini"
 
-    def __init__(self, model: str = "gemini-2.0-flash", temperature: float = 0.2, **kwargs):
+    def __init__(self, model: str = "gemini-3.8-flash", temperature: float = 0.2, **kwargs):
         self._model = model
         self._temperature = temperature
 
