@@ -17,6 +17,8 @@ class BacktestRequest(BaseModel):
     spread_pips: float = 1.0
     commission_per_lot: float = 7.0
     slippage_pips: float = 0.5
+    initial_balance: float = 10_000.0
+    data_source: str = "synthetic"   # "synthetic" | "yfinance" | "csv:<key>"
 
 
 class BacktestResult(BaseModel):
@@ -29,11 +31,13 @@ class BacktestResult(BaseModel):
     total_trades: int
     equity_curve: list[float]
     trades: list[dict]
+    data_source: str = "synthetic"
+    bars_used: int = 0
 
 
 @router.post("", response_model=BacktestResult)
 async def run_backtest(req: BacktestRequest):
-    """Run a backtest — implemented in Phase 8."""
+    """Run a backtest with configurable data source and parameters."""
     from backend.backtest.engine import Backtester
     try:
         bt = Backtester(
@@ -45,6 +49,8 @@ async def run_backtest(req: BacktestRequest):
             spread_pips=req.spread_pips,
             commission_per_lot=req.commission_per_lot,
             slippage_pips=req.slippage_pips,
+            initial_balance=req.initial_balance,
+            data_source=req.data_source,
         )
         result = await bt.run()
         return result

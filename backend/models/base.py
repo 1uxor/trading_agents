@@ -11,6 +11,7 @@ class ModelProvider(ABC):
 
     name: str = "base"
     license_info: str = ""     # shown in UI for HF models
+    available_models: list[dict] = []  # [{id, label, description?}] shown in UI
 
     @abstractmethod
     async def predict(self, data: pd.DataFrame, symbol: str = "", **kwargs) -> dict:

@@ -12,7 +12,6 @@ const AGENT_COLORS = [
 ];
 
 const COMBINE_MODES = [
-  { value: '', label: 'Single strategy (no combiner)' },
   { value: 'majority_vote', label: 'Majority vote' },
   { value: 'weighted_vote', label: 'Weighted vote' },
   { value: 'unanimous', label: 'Unanimous' },
@@ -20,19 +19,25 @@ const COMBINE_MODES = [
   { value: 'confidence_weighted', label: 'Confidence-weighted average' },
 ];
 
+const LLM_PROVIDERS = new Set(['gemini', 'openai', 'anthropic', 'ollama']);
+
+let agentCounter = 1;
+
 export function AgentForm({ onCreated }: Props) {
   const [strategies, setStrategies] = useState<StrategyMeta[]>([]);
   const [providers, setProviders] = useState<{ name: string; license: string }[]>([]);
   const [timeframes, setTimeframes] = useState<string[]>([]);
+  const [availableModels, setAvailableModels] = useState<{ id: string; label: string; license?: string }[]>([]);
 
-  const [name, setName] = useState('New Agent');
+  const [name, setName] = useState('');
   const [color, setColor] = useState(AGENT_COLORS[Math.floor(Math.random() * AGENT_COLORS.length)]);
   const [symbols, setSymbols] = useState('EURUSD');
   const [timeframe, setTimeframe] = useState('H1');
   const [modelProvider, setModelProvider] = useState('no_model');
+  const [selectedModel, setSelectedModel] = useState('');
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>(['ma_crossover']);
   const [strategyParams, setStrategyParams] = useState<Record<string, Record<string, unknown>>>({});
-  const [combineMode, setCombineMode] = useState('');
+  const [combineMode, setCombineMode] = useState('majority_vote');
   const [scheduleSeconds, setScheduleSeconds] = useState(60);
   const [riskPerTrade, setRiskPerTrade] = useState(1.0);
   const [maxPositions, setMaxPositions] = useState(3);
@@ -50,22 +55,64 @@ export function AgentForm({ onCreated }: Props) {
     );
   }, []);
 
+  // Fetch available models when provider changes
+  useEffect(() => {
+    if (modelProvider === 'no_model') {
+      setAvailableModels([]);
+      setSelectedModel('');
+      return;
+    }
+    api.getProviderModels(modelProvider).then((models) => {
+      setAvailableModels(models);
+      setSelectedModel(models.length > 0 ? models[0].id : '');
+    }).catch(() => {
+      setAvailableModels([]);
+      setSelectedModel('');
+    });
+  }, [modelProvider]);
+
+  // Generate default name from strategy + symbol
+  const defaultName = () => {
+    const strat = selectedStrategies[0] || 'agent';
+    const sym = symbols.split(',')[0]?.trim() || 'PAIR';
+    return `${strat}-${sym}-${agentCounter}`;
+  };
+
+  // Validation warnings
+  const hasLlmStrategy = selectedStrategies.includes('llm_discretionary');
+  const llmProviderWarning = hasLlmStrategy && !LLM_PROVIDERS.has(modelProvider);
+
   const handleSubmit = async () => {
     setError('');
+
+    if (llmProviderWarning) {
+      setError('llm_discretionary requires an LLM provider (gemini, openai, anthropic, or ollama).');
+      return;
+    }
+
     setSubmitting(true);
     try {
+      // Build model_config with the selected model
+      const modelConfig: Record<string, unknown> = {};
+      if (selectedModel) {
+        const key = modelProvider === 'hf_forecaster' ? 'model_id' : 'model';
+        modelConfig[key] = selectedModel;
+      }
+
+      const useName = name.trim() || defaultName();
+
       const config: AgentConfig = {
-        name,
+        name: useName,
         color,
         symbols: symbols.split(',').map((s) => s.trim()),
         timeframe,
         model_provider: modelProvider,
-        model_config: {},
+        model_config: modelConfig,
         strategies: selectedStrategies.map((sn) => ({
           name: sn,
           params: strategyParams[sn] || {},
         })),
-        combiner: combineMode ? { mode: combineMode as any } : null,
+        combiner: selectedStrategies.length > 1 ? { mode: combineMode as any } : null,
         risk_profile: {
           max_risk_per_trade_pct: riskPerTrade,
           max_open_positions: maxPositions,
@@ -76,6 +123,7 @@ export function AgentForm({ onCreated }: Props) {
         enabled: true,
       };
       await api.createAgent(config);
+      agentCounter++;
       onCreated();
     } catch (e: any) {
       setError(e.message || 'Failed to create agent');
@@ -107,7 +155,12 @@ export function AgentForm({ onCreated }: Props) {
       {/* Basic info */}
       <Section title="Identity">
         <Field label="Name">
-          <input value={name} onChange={(e) => setName(e.target.value)} className="input-field" />
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={defaultName()}
+            className="input-field"
+          />
         </Field>
         <Field label="Color">
           <div className="flex gap-2">
@@ -154,6 +207,30 @@ export function AgentForm({ onCreated }: Props) {
             </button>
           ))}
         </div>
+
+        {/* Model selector */}
+        {availableModels.length > 0 && (
+          <Field label="Model">
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="input-field"
+            >
+              {availableModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}{m.license ? ` (${m.license})` : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+
+        {/* LLM provider warning */}
+        {llmProviderWarning && (
+          <div className="bg-yellow-900/30 border border-yellow-700 text-yellow-400 text-xs rounded-lg p-2">
+            llm_discretionary requires an LLM provider (gemini, openai, anthropic, or ollama).
+          </div>
+        )}
       </Section>
 
       {/* Strategies */}
@@ -217,7 +294,7 @@ export function AgentForm({ onCreated }: Props) {
           ))}
         </div>
 
-        {/* Combiner mode */}
+        {/* Combiner mode — shown when 2+ strategies */}
         {selectedStrategies.length > 1 && (
           <Field label="Combination Mode">
             <select value={combineMode} onChange={(e) => setCombineMode(e.target.value)} className="input-field">
@@ -246,7 +323,7 @@ export function AgentForm({ onCreated }: Props) {
 
       <button
         onClick={handleSubmit}
-        disabled={submitting || selectedStrategies.length === 0}
+        disabled={submitting || selectedStrategies.length === 0 || llmProviderWarning}
         className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-semibold rounded-xl transition-colors"
       >
         {submitting ? 'Creating...' : 'Create Agent'}

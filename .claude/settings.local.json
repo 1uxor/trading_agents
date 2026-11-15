@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(cd \"C:/my things/trading_agents\" && python -m pytest tests/test_agent_validation.py -v 2>&1)",
+      "Bash(cd \"C:/my things/trading_agents\" && python -m pytest tests/ -v 2>&1)",
+      "Bash(cd \"C:/my things/trading_agents\" && python -m pytest tests/test_backtest.py -v 2>&1)",
+      "Bash(cd:*)"
+    ]
+  }
+}

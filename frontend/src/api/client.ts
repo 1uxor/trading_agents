@@ -38,10 +38,27 @@ export const api = {
   // Config
   getStrategies: () => request<any[]>('/api/config/strategies'),
   getModelProviders: () => request<any[]>('/api/config/model-providers'),
+  getProviderModels: (provider: string) => request<any[]>(`/api/config/model-providers/${provider}/models`),
   getTimeframes: () => request<string[]>('/api/config/timeframes'),
 
   // Backtest
   runBacktest: (req: any) => request<any>('/api/backtest', { method: 'POST', body: JSON.stringify(req) }),
+
+  // Data
+  getDatasets: () => request<any[]>('/api/data/datasets'),
+  uploadCsv: async (file: File, name: string, symbol: string, timeframe: string) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('name', name);
+    form.append('symbol', symbol);
+    form.append('timeframe', timeframe);
+    const res = await fetch('/api/data/upload-csv', { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || res.statusText);
+    }
+    return res.json();
+  },
 
   // Health
   health: () => request<any>('/api/health'),

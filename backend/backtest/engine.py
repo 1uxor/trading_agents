@@ -31,6 +31,7 @@ class Backtester:
         commission_per_lot: float = 7.0,
         slippage_pips: float = 0.5,
         initial_balance: float = 10_000.0,
+        data_source: str = "synthetic",
     ):
         self._config = agent_config
         self._symbol = symbol
@@ -41,16 +42,37 @@ class Backtester:
         self._commission = commission_per_lot
         self._slippage = slippage_pips * 0.0001
         self._balance = initial_balance
+        self._data_source = data_source
 
-    async def run(self) -> dict:
-        # Generate synthetic data
+    async def _load_data(self) -> pd.DataFrame:
+        """Load OHLCV data from the configured source."""
+        if self._data_source == "yfinance":
+            from backend.market_data.yfinance_provider import fetch_yfinance_ohlcv
+            return fetch_yfinance_ohlcv(
+                symbol=self._symbol,
+                timeframe=self._timeframe,
+                bars=self._bars,
+            )
+
+        if self._data_source.startswith("csv:"):
+            from backend.api.data_upload import get_dataset
+            key = self._data_source[4:]  # strip "csv:" prefix
+            df = get_dataset(key)
+            if len(df) > self._bars:
+                df = df.tail(self._bars).reset_index(drop=True)
+            return df
+
+        # Default: synthetic
         data_provider = PaperDataProvider()
         data_provider.load_synthetic(
             symbol=self._symbol,
             timeframe=Timeframe(self._timeframe),
             bars=self._bars,
         )
-        full_data = await data_provider.get_ohlcv(self._symbol, Timeframe(self._timeframe), self._bars)
+        return await data_provider.get_ohlcv(self._symbol, Timeframe(self._timeframe), self._bars)
+
+    async def run(self) -> dict:
+        full_data = await self._load_data()
 
         # Build strategies
         strategies = []
@@ -122,7 +144,7 @@ class Backtester:
                             "entry_price": position["entry_price"],
                             "exit_price": exit_price,
                             "lot_size": position["lot_size"],
-                            "pnl": pnl,
+                            "pnl": round(pnl, 2),
                             "exit_reason": "sl" if hit_sl else "tp",
                         }
                         all_trades.append(trade)
@@ -185,7 +207,7 @@ class Backtester:
                     "entry_price": position["entry_price"],
                     "exit_price": exit_price,
                     "lot_size": position["lot_size"],
-                    "pnl": pnl,
+                    "pnl": round(pnl, 2),
                     "exit_reason": "end_of_data",
                 })
                 position = None
@@ -197,6 +219,8 @@ class Backtester:
             **metrics,
             "equity_curve": equity_curve,
             "trades": all_trades,
+            "data_source": self._data_source,
+            "bars_used": len(full_data),
         }
 
     def _calculate_pnl(self, position: dict, exit_price: float) -> float:

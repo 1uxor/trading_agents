@@ -102,6 +102,8 @@ export interface BacktestRequest {
   spread_pips: number;
   commission_per_lot: number;
   slippage_pips: number;
+  initial_balance: number;
+  data_source: string;
 }
 
 export interface BacktestResult {
@@ -114,6 +116,8 @@ export interface BacktestResult {
   total_trades: number;
   equity_curve: number[];
   trades: Record<string, unknown>[];
+  data_source: string;
+  bars_used: number;
 }
 
 export interface OHLCVBar {

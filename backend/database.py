@@ -30,10 +30,8 @@ class DBAgent(Base):
     timeframe = Column(String, nullable=False)
     model_provider = Column(String, nullable=False)
     model_config_json = Column(JSON, default=dict)
-    strategy_name = Column(String, nullable=False)
-    strategy_params = Column(JSON, default=dict)
-    combiner_mode = Column(String, nullable=True)
-    combiner_config = Column(JSON, nullable=True)
+    strategies_json = Column(JSON, nullable=False)  # list[{name, params}]
+    combiner_json = Column(JSON, nullable=True)     # {mode, weights?, filter_roles?}
     risk_profile = Column(JSON, default=dict)
     schedule_seconds = Column(Integer, default=60)
     enabled = Column(Boolean, default=True)

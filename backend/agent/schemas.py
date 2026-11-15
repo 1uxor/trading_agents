@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from backend.risk.models import RiskProfile
 from backend.strategies.combiner import CombineMode
+
+# Strategies that require an LLM provider (not hf_forecaster, not no_model)
+LLM_STRATEGIES = {"llm_discretionary"}
+# Valid LLM providers for llm_discretionary
+LLM_PROVIDERS = {"gemini", "openai", "anthropic", "ollama"}
 
 
 class StrategyConfig(BaseModel):
@@ -35,3 +40,26 @@ class AgentConfig(BaseModel):
     enabled: bool = True
 
     model_config = {"populate_by_name": True}
+
+    @model_validator(mode="after")
+    def validate_config(self):
+        strategy_names = {s.name for s in self.strategies}
+
+        # Multiple strategies require a combiner
+        if len(self.strategies) > 1 and self.combiner is None:
+            self.combiner = CombinerConfig(mode=CombineMode.MAJORITY_VOTE)
+
+        # Single strategy must not have a combiner
+        if len(self.strategies) == 1 and self.combiner is not None:
+            self.combiner = None
+
+        # llm_discretionary requires an LLM provider
+        if strategy_names & LLM_STRATEGIES:
+            if self.model_provider not in LLM_PROVIDERS:
+                raise ValueError(
+                    f"Strategy llm_discretionary requires an LLM provider "
+                    f"({', '.join(sorted(LLM_PROVIDERS))}), "
+                    f"got '{self.model_provider}'"
+                )
+
+        return self

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from backend.strategies.base import list_strategies
-from backend.models.base import list_model_providers
+from backend.models.base import list_model_providers, get_model_provider
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -31,6 +31,16 @@ async def get_model_providers():
             "license": getattr(cls, "license_info", ""),
         })
     return result
+
+
+@router.get("/model-providers/{provider}/models")
+async def get_provider_models(provider: str):
+    """List available models for a specific provider."""
+    try:
+        cls = get_model_provider(provider)
+    except ValueError:
+        raise HTTPException(404, f"Unknown provider: {provider}")
+    return getattr(cls, "available_models", [])
 
 
 @router.get("/timeframes")

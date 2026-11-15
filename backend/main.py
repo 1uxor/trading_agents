@@ -79,6 +79,37 @@ async def lifespan(app: FastAPI):
 
     set_instances(broker, market_data, risk_manager, trade_logger, runner)
 
+    # Restore agents from database
+    from backend.database import DBAgent, get_session_factory
+    from backend.agent.schemas import AgentConfig, StrategyConfig, CombinerConfig
+    from backend.risk.models import RiskProfile
+
+    factory = get_session_factory()
+    async with factory() as session:
+        from sqlalchemy import select
+        result = await session.execute(select(DBAgent))
+        db_agents = result.scalars().all()
+        for dba in db_agents:
+            try:
+                config = AgentConfig(
+                    id=dba.id,
+                    name=dba.name,
+                    color=dba.color,
+                    symbols=dba.symbols,
+                    timeframe=dba.timeframe,
+                    model_provider=dba.model_provider,
+                    model_config=dba.model_config_json or {},
+                    strategies=[StrategyConfig(**s) for s in (dba.strategies_json or [])],
+                    combiner=CombinerConfig(**dba.combiner_json) if dba.combiner_json else None,
+                    risk_profile=RiskProfile(**(dba.risk_profile or {})),
+                    schedule_seconds=dba.schedule_seconds,
+                    enabled=dba.enabled,
+                )
+                runner.create_agent(config)
+                logger.info("Restored agent %s (%s) from database", dba.id, dba.name)
+            except Exception as e:
+                logger.error("Failed to restore agent %s: %s", dba.id, e)
+
     # Try to connect MT5 if credentials exist
     if settings.mt5_login and settings.mt5_password and settings.live_trading:
         logger.info("MT5 credentials found — but live trading requires UI confirmation")
@@ -115,12 +146,14 @@ from backend.api.market import router as market_router
 from backend.api.risk import router as risk_router
 from backend.api.backtest import router as backtest_router
 from backend.api.strategies import router as config_router
+from backend.api.data_upload import router as data_router
 
 app.include_router(agents_router)
 app.include_router(market_router)
 app.include_router(risk_router)
 app.include_router(backtest_router)
 app.include_router(config_router)
+app.include_router(data_router)
 
 
 # ── WebSocket ───────────────────────────────────────────────────────────────

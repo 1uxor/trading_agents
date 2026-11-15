@@ -1,4 +1,12 @@
 import pytest
+
+# Import strategy modules to trigger registration
+import backend.strategies.ma_crossover
+import backend.strategies.rsi_reversion
+import backend.strategies.breakout
+import backend.strategies.forecast_driven
+import backend.strategies.llm_discretionary
+
 from backend.agent.schemas import AgentConfig, StrategyConfig
 from backend.backtest.engine import Backtester
 from backend.backtest.metrics import compute_metrics

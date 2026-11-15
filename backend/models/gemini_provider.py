@@ -14,6 +14,13 @@ logger = logging.getLogger(__name__)
 @register_model_provider
 class GeminiProvider(ModelProvider):
     name = "gemini"
+    available_models = [
+        {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash"},
+        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
+        {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
+        {"id": "gemini-2.0-flash", "label": "Gemini 2.0 Flash"},
+        {"id": "gemini-1.5-pro", "label": "Gemini 1.5 Pro"},
+    ]
 
     def __init__(self, model: str = "gemini-3.8-flash", temperature: float = 0.2, **kwargs):
         self._model = model

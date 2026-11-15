@@ -14,6 +14,12 @@ logger = logging.getLogger(__name__)
 @register_model_provider
 class OpenAIProvider(ModelProvider):
     name = "openai"
+    available_models = [
+        {"id": "gpt-4o-mini", "label": "GPT-4o Mini"},
+        {"id": "gpt-4o", "label": "GPT-4o"},
+        {"id": "gpt-4-turbo", "label": "GPT-4 Turbo"},
+        {"id": "o1-mini", "label": "o1 Mini"},
+    ]
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2, **kwargs):
         self._model = model

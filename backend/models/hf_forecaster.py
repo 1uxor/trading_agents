@@ -28,6 +28,10 @@ HF_MODEL_LICENSES = {
 @register_model_provider
 class HuggingFaceForecaster(ModelProvider):
     name = "hf_forecaster"
+    available_models = [
+        {"id": mid, "label": mid.split("/")[-1], "license": lic}
+        for mid, lic in HF_MODEL_LICENSES.items()
+    ]
 
     def __init__(
         self,

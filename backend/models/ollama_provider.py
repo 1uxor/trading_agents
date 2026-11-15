@@ -15,6 +15,13 @@ logger = logging.getLogger(__name__)
 @register_model_provider
 class OllamaProvider(ModelProvider):
     name = "ollama"
+    available_models = [
+        {"id": "llama3.1", "label": "Llama 3.1"},
+        {"id": "llama3.2", "label": "Llama 3.2"},
+        {"id": "mistral", "label": "Mistral"},
+        {"id": "codellama", "label": "Code Llama"},
+        {"id": "gemma2", "label": "Gemma 2"},
+    ]
 
     def __init__(self, model: str = "llama3.1", temperature: float = 0.2, **kwargs):
         self._model = model

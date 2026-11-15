@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
 import traceback
 from enum import Enum
@@ -20,6 +21,16 @@ from backend.strategies.base import Strategy, Signal, SignalDirection, get_strat
 from backend.strategies.combiner import StrategyCombiner, CombinerConfig as StrategyCombinerConfig
 
 logger = logging.getLogger(__name__)
+
+# Strategies that consume model output
+MODEL_STRATEGIES = {"forecast_driven", "llm_discretionary"}
+
+# Timeframe to approximate seconds mapping for candle close detection
+_TF_SECONDS = {
+    "M1": 60, "M5": 300, "M15": 900, "M30": 1800,
+    "H1": 3600, "H4": 14400, "D1": 86400, "W1": 604800,
+    "MN1": 2592000,
+}
 
 
 class AgentState(str, Enum):
@@ -69,9 +80,12 @@ class Agent:
             )
             self._combiner = StrategyCombiner(self._strategies, combiner_cfg)
 
-        # Model provider
+        # Model provider — only instantiate if at least one strategy needs it
         self._model: ModelProvider | None = None
-        if config.model_provider != "no_model":
+        self._needs_model = any(
+            s.name in MODEL_STRATEGIES for s, _ in self._strategies
+        )
+        if config.model_provider != "no_model" and self._needs_model:
             provider_cls = get_model_provider(config.model_provider)
             self._model = provider_cls(**(config.model_config_ or {}))
 
@@ -82,6 +96,11 @@ class Agent:
             color=config.color,
             callback=commentary_callback,
         )
+
+        # Candle tracking per symbol (for new-candle detection)
+        self._last_candle_ts: dict[str, float] = {}
+        # Market-closed tracking — only log once per closed period
+        self._market_closed_logged: dict[str, bool] = {}
 
     @property
     def state(self) -> AgentState:
@@ -148,20 +167,56 @@ class Agent:
             self._state = AgentState.STOPPED
             logger.info("Agent %s stopped", self.id)
 
+    def _is_market_closed(self) -> bool:
+        """Check if market is likely closed (weekend for FX)."""
+        now = dt.datetime.utcnow()
+        # FX market: closed from Friday ~22:00 UTC to Sunday ~22:00 UTC
+        weekday = now.weekday()  # Monday=0, Sunday=6
+        if weekday == 5:  # Saturday
+            return True
+        if weekday == 6 and now.hour < 22:  # Sunday before 22:00 UTC
+            return True
+        if weekday == 4 and now.hour >= 22:  # Friday after 22:00 UTC
+            return True
+        return False
+
     async def _tick(self, symbol: str):
         tf = Timeframe(self.config.timeframe)
 
+        # Market closed detection
+        if self._is_market_closed():
+            if not self._market_closed_logged.get(symbol, False):
+                await self._commentary.emit(
+                    CommentaryEventType.EXPLANATION,
+                    f"Market closed for {symbol}. Will resume when market opens.",
+                    strategy=self._strategy_label(),
+                )
+                self._market_closed_logged[symbol] = True
+                logger.info("Agent %s: Market closed for %s", self.id, symbol)
+            return
+        # Reset the market-closed flag when market is open
+        self._market_closed_logged[symbol] = False
+
         # 1. Fetch data
-        await self._commentary.emit(
-            CommentaryEventType.THINKING,
-            f"Fetching {symbol} {tf.value} data...",
-            strategy=self._strategy_label(),
-        )
         data = await self._market_data.get_ohlcv(symbol, tf, count=500)
 
-        # 2. Model prediction (if any)
+        # 2. Check for new candle
+        latest_ts = float(data["time"].iloc[-1])
+        prev_ts = self._last_candle_ts.get(symbol)
+        if prev_ts is not None and latest_ts == prev_ts:
+            logger.debug("Agent %s: No new candle for %s %s", self.id, symbol, tf.value)
+            return
+        self._last_candle_ts[symbol] = latest_ts
+
+        await self._commentary.emit(
+            CommentaryEventType.THINKING,
+            f"New {tf.value} candle for {symbol}. Analyzing...",
+            strategy=self._strategy_label(),
+        )
+
+        # 3. Model prediction — only if strategies need it
         model_output = None
-        if self._model is not None:
+        if self._model is not None and self._needs_model:
             await self._commentary.emit(
                 CommentaryEventType.THINKING,
                 f"Running {self.config.model_provider} model on {symbol}...",
@@ -177,13 +232,13 @@ class Agent:
                     strategy=self._strategy_label(),
                 )
 
-        # 3. Generate signal
+        # 4. Generate signal
         if self._combiner:
             model_outputs = {strat.name: model_output for strat, _ in self._strategies}
             signal, sub_signals = self._combiner.generate_signal(data, model_outputs)
             # Commentary for each sub-strategy
             for (strat, params), sub_sig in zip(self._strategies, sub_signals):
-                comment = strat.commentary(data, sub_sig, params)
+                comment = self._build_signal_commentary(strat, data, sub_sig, params, model_output)
                 await self._commentary.emit(
                     CommentaryEventType.SIGNAL,
                     comment,
@@ -194,7 +249,7 @@ class Agent:
         else:
             strat, params = self._strategies[0]
             signal = strat.generate_signal(data, model_output=model_output, params=params)
-            comment = strat.commentary(data, signal, params)
+            comment = self._build_signal_commentary(strat, data, signal, params, model_output)
             await self._commentary.emit(
                 CommentaryEventType.SIGNAL,
                 comment,
@@ -203,9 +258,10 @@ class Agent:
                 data={"direction": signal.direction.value, "symbol": symbol},
             )
 
-        # 4. HOLD => skip
+        # 5. HOLD => skip
+        price = data['close'].iloc[-1]
         if signal.direction == SignalDirection.HOLD:
-            inputs_summary = f"price={data['close'].iloc[-1]:.5f}"
+            inputs_summary = f"price={price:.5f}"
             await self._trade_logger.log_signal(
                 agent_id=self.id, symbol=symbol,
                 model_provider=self.config.model_provider,
@@ -218,7 +274,7 @@ class Agent:
             )
             return
 
-        # 5. Build order
+        # 6. Build order
         if signal.sl is None:
             await self._commentary.emit(
                 CommentaryEventType.ERROR,
@@ -237,7 +293,7 @@ class Agent:
             agent_id=self.id,
         )
 
-        # 6. Risk check (MANDATORY)
+        # 7. Risk check (MANDATORY)
         await self._commentary.emit(
             CommentaryEventType.EXECUTING,
             f"Checking risk for {signal.direction.value} {symbol}...",
@@ -258,7 +314,7 @@ class Agent:
                 agent_id=self.id, symbol=symbol,
                 model_provider=self.config.model_provider,
                 strategy_name=self._strategy_label(),
-                inputs_summary=f"price={data['close'].iloc[-1]:.5f}",
+                inputs_summary=f"price={price:.5f}",
                 signal=signal.direction.value, confidence=signal.confidence,
                 reasoning=signal.reasoning,
                 risk_check_result="rejected", risk_check_reason=risk_result.reason,
@@ -270,7 +326,7 @@ class Agent:
         if risk_result.adjusted_lot_size:
             order.lot_size = risk_result.adjusted_lot_size
 
-        # 7. Execute order
+        # 8. Execute order
         await self._commentary.emit(
             CommentaryEventType.EXECUTING,
             f"Placing {order.direction.value} {order.lot_size} lots on {symbol} @ market, SL={order.sl:.5f}",
@@ -281,7 +337,7 @@ class Agent:
 
         result = await self._broker.place_order(order)
 
-        # 8. Log everything
+        # 9. Log everything
         status = "filled" if result.success else "failed"
         await self._commentary.emit(
             CommentaryEventType.RESULT,
@@ -295,7 +351,7 @@ class Agent:
             agent_id=self.id, symbol=symbol,
             model_provider=self.config.model_provider,
             strategy_name=self._strategy_label(),
-            inputs_summary=f"price={data['close'].iloc[-1]:.5f}",
+            inputs_summary=f"price={price:.5f}",
             signal=signal.direction.value, confidence=signal.confidence,
             reasoning=signal.reasoning,
             risk_check_result="approved", risk_check_reason=risk_result.reason,
@@ -311,6 +367,101 @@ class Agent:
                 sl=order.sl, tp=order.tp,
                 broker_ticket=result.ticket,
             )
+
+    def _build_signal_commentary(
+        self,
+        strat: Strategy,
+        data: pd.DataFrame,
+        signal: Signal,
+        params: dict,
+        model_output: Any | None,
+    ) -> str:
+        """Build enriched signal commentary with actual numbers."""
+        price = data["close"].iloc[-1]
+
+        if strat.name == "forecast_driven" and model_output:
+            forecast = model_output.get("forecast")
+            q_low = model_output.get("quantile_low")
+            q_high = model_output.get("quantile_high")
+            forecast_return = ((forecast - price) / price * 100) if forecast else 0
+            p = {spec.name: spec.default for spec in strat.parameters()}
+            if params:
+                p.update(params)
+            parts = [
+                f"forecast_driven | price={price:.5f}",
+                f"forecast={forecast:.5f}" if forecast else "forecast=N/A",
+                f"return={forecast_return:+.3f}%",
+                f"threshold={p.get('return_threshold', 0.1)}%",
+            ]
+            if q_low is not None:
+                parts.append(f"q10={q_low:.5f}")
+            parts.append(f"q50={forecast:.5f}" if forecast else "q50=N/A")
+            if q_high is not None:
+                parts.append(f"q90={q_high:.5f}")
+            parts.append(f"=> {signal.direction.value} (conf={signal.confidence:.0%})")
+            return " | ".join(parts)
+
+        if strat.name == "llm_discretionary" and model_output:
+            raw_signal = model_output.get("signal", "HOLD")
+            raw_conf = model_output.get("confidence", 0)
+            raw_reasoning = model_output.get("reasoning", "")
+            provider = self.config.model_provider
+            model_name = (self.config.model_config_ or {}).get("model", "default")
+            return (
+                f"llm_discretionary | provider={provider} model={model_name} | "
+                f"LLM output: signal={raw_signal} conf={raw_conf:.0%} | "
+                f"reasoning: {raw_reasoning} | => {signal.direction.value}"
+            )
+
+        if strat.name == "ma_crossover":
+            import ta
+            p = {spec.name: spec.default for spec in strat.parameters()}
+            if params:
+                p.update(params)
+            close = data["close"]
+            fast = int(p["fast_period"])
+            slow = int(p["slow_period"])
+            if p.get("ma_type") == "EMA":
+                ma_fast_val = ta.trend.EMAIndicator(close, window=fast).ema_indicator().iloc[-1]
+                ma_slow_val = ta.trend.EMAIndicator(close, window=slow).ema_indicator().iloc[-1]
+            else:
+                ma_fast_val = ta.trend.SMAIndicator(close, window=fast).sma_indicator().iloc[-1]
+                ma_slow_val = ta.trend.SMAIndicator(close, window=slow).sma_indicator().iloc[-1]
+            return (
+                f"ma_crossover | price={price:.5f} | "
+                f"MA({fast})={ma_fast_val:.5f} MA({slow})={ma_slow_val:.5f} | "
+                f"=> {signal.direction.value} (conf={signal.confidence:.0%})"
+            )
+
+        if strat.name == "rsi_reversion":
+            import ta
+            p = {spec.name: spec.default for spec in strat.parameters()}
+            if params:
+                p.update(params)
+            close = data["close"]
+            rsi_val = ta.momentum.RSIIndicator(close, window=int(p["rsi_period"])).rsi().iloc[-1]
+            return (
+                f"rsi_reversion | price={price:.5f} | "
+                f"RSI({int(p['rsi_period'])})={rsi_val:.1f} "
+                f"[oversold={p['oversold']} overbought={p['overbought']}] | "
+                f"=> {signal.direction.value} (conf={signal.confidence:.0%})"
+            )
+
+        if strat.name == "breakout":
+            p = {spec.name: spec.default for spec in strat.parameters()}
+            if params:
+                p.update(params)
+            period = int(p["channel_period"])
+            upper = data["high"].rolling(window=period).max().shift(1).iloc[-1]
+            lower = data["low"].rolling(window=period).min().shift(1).iloc[-1]
+            return (
+                f"breakout | price={price:.5f} | "
+                f"Donchian({period}): upper={upper:.5f} lower={lower:.5f} | "
+                f"=> {signal.direction.value} (conf={signal.confidence:.0%})"
+            )
+
+        # Fallback: use strategy's own commentary
+        return strat.commentary(data, signal, params)
 
     def _strategy_label(self) -> str:
         names = [s.name for s, _ in self._strategies]

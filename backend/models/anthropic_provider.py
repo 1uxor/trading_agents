@@ -14,6 +14,11 @@ logger = logging.getLogger(__name__)
 @register_model_provider
 class AnthropicProvider(ModelProvider):
     name = "anthropic"
+    available_models = [
+        {"id": "claude-sonnet-4-20250514", "label": "Claude Sonnet 4"},
+        {"id": "claude-haiku-4-20250414", "label": "Claude Haiku 4"},
+        {"id": "claude-3-5-sonnet-20241022", "label": "Claude 3.5 Sonnet"},
+    ]
 
     def __init__(self, model: str = "claude-sonnet-4-20250514", temperature: float = 0.2, **kwargs):
         self._model = model
