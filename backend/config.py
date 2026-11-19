@@ -53,6 +53,13 @@ def get_settings() -> Settings:
     if _settings is None:
         env_path = Path(__file__).resolve().parent.parent / ".env"
         if env_path.exists():
+            # Load .env values and inject into os.environ so they take priority
+            # over stale OS-level env vars from previous runs
+            from dotenv import dotenv_values
+            env_values = dotenv_values(str(env_path))
+            for key, val in env_values.items():
+                if val is not None:
+                    os.environ[key] = val
             _settings = Settings(_env_file=str(env_path))
         else:
             _settings = Settings()

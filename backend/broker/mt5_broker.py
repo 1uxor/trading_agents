@@ -18,6 +18,29 @@ class MT5Broker(BrokerAdapter):
     def __init__(self):
         self._connected = False
 
+    @staticmethod
+    def _get_filling_mode(symbol: str):
+        """Detect the filling mode supported by a symbol.
+
+        MT5 filling_mode is a bitmask: bit 0 = FOK allowed, bit 1 = IOC allowed.
+        If neither is set, use RETURN (exchange execution).
+        """
+        import MetaTrader5 as mt5
+
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            return mt5.ORDER_FILLING_FOK
+
+        filling = info.filling_mode
+        # Bit 0 → FOK supported
+        if filling & 1:
+            return mt5.ORDER_FILLING_FOK
+        # Bit 1 → IOC supported
+        elif filling & 2:
+            return mt5.ORDER_FILLING_IOC
+        else:
+            return mt5.ORDER_FILLING_RETURN
+
     async def connect(self) -> bool:
         import MetaTrader5 as mt5
 
@@ -62,8 +85,29 @@ class MT5Broker(BrokerAdapter):
             currency=info.currency,
         )
 
+    def _ensure_connected(self):
+        """Re-initialize MT5 if the connection was lost."""
+        import MetaTrader5 as mt5
+
+        if mt5.account_info() is not None:
+            return  # Still connected
+
+        logger.warning("MT5 connection lost — reconnecting...")
+        settings = get_settings()
+        if not mt5.initialize(
+            path=settings.mt5_path or None,
+            login=settings.mt5_login,
+            password=settings.mt5_password,
+            server=settings.mt5_server,
+        ):
+            logger.error("MT5 reconnect failed: %s", mt5.last_error())
+        else:
+            logger.info("MT5 reconnected successfully")
+
     async def place_order(self, order: OrderRequest) -> OrderResult:
         import MetaTrader5 as mt5
+
+        self._ensure_connected()
 
         symbol_info = mt5.symbol_info(order.symbol)
         if symbol_info is None:
@@ -91,12 +135,14 @@ class MT5Broker(BrokerAdapter):
             "magic": 234000,
             "comment": order.comment[:31],  # MT5 comment limit
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": self._get_filling_mode(order.symbol),
         }
 
         result = mt5.order_send(request)
         if result is None:
-            return OrderResult(success=False, message="order_send returned None")
+            error = mt5.last_error()
+            logger.warning("order_send returned None, last_error=%s", error)
+            return OrderResult(success=False, message=f"order_send failed: {error}")
 
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             return OrderResult(
@@ -114,6 +160,7 @@ class MT5Broker(BrokerAdapter):
     async def close_position(self, ticket: str) -> OrderResult:
         import MetaTrader5 as mt5
 
+        self._ensure_connected()
         positions = mt5.positions_get(ticket=int(ticket))
         if not positions:
             return OrderResult(success=False, message=f"Position {ticket} not found")
@@ -138,7 +185,7 @@ class MT5Broker(BrokerAdapter):
             "magic": 234000,
             "comment": "close",
             "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
+            "type_filling": self._get_filling_mode(pos.symbol),
         }
 
         result = mt5.order_send(request)
@@ -165,6 +212,7 @@ class MT5Broker(BrokerAdapter):
 
     async def get_positions(self, agent_id: str | None = None) -> list[Position]:
         import MetaTrader5 as mt5
+        self._ensure_connected()
         positions = mt5.positions_get() or []
         result = []
         for pos in positions:

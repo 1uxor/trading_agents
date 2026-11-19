@@ -17,8 +17,9 @@ class OpenAIProvider(ModelProvider):
     available_models = [
         {"id": "gpt-4o-mini", "label": "GPT-4o Mini"},
         {"id": "gpt-4o", "label": "GPT-4o"},
-        {"id": "gpt-4-turbo", "label": "GPT-4 Turbo"},
-        {"id": "o1-mini", "label": "o1 Mini"},
+        {"id": "gpt-4.1-mini", "label": "GPT-4.1 Mini"},
+        {"id": "gpt-4.1", "label": "GPT-4.1"},
+        {"id": "o3-mini", "label": "o3 Mini"},
     ]
 
     def __init__(self, model: str = "gpt-4o-mini", temperature: float = 0.2, **kwargs):

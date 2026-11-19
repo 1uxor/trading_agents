@@ -50,14 +50,39 @@ class RSIReversionStrategy(Strategy):
         reasoning = f"RSI({int(p['rsi_period'])}) = {current_rsi:.1f}"
         confidence = 0.0
 
+        # Always generate a directional signal based on RSI position
         if current_rsi < p["oversold"]:
             direction = SignalDirection.BUY
-            confidence = min((p["oversold"] - current_rsi) / p["oversold"], 1.0)
-            reasoning = f"RSI at {current_rsi:.1f} — oversold territory (< {p['oversold']}). Looking for a bounce."
+            confidence = min((p["oversold"] - current_rsi) / p["oversold"] + 0.5, 1.0)
+            reasoning = f"RSI at {current_rsi:.1f} — deep oversold (< {p['oversold']}). Strong bounce expected."
+        elif current_rsi < 50:
+            # Below 50 → lean BUY (mean reversion: RSI tends to revert toward 50)
+            direction = SignalDirection.BUY
+            # Scale: RSI 30 → 55% conf, RSI 49 → 10% conf
+            depth = (50 - current_rsi) / 20  # 0 at RSI=50, 1 at RSI=30
+            confidence = 0.10 + min(depth, 1.0) * 0.45
+            reasoning = f"RSI at {current_rsi:.1f} — below midline, leaning bullish for reversion."
         elif current_rsi > p["overbought"]:
             direction = SignalDirection.SELL
-            confidence = min((current_rsi - p["overbought"]) / (100 - p["overbought"]), 1.0)
-            reasoning = f"RSI at {current_rsi:.1f} — overbought (> {p['overbought']}). Expecting a pullback."
+            confidence = min((current_rsi - p["overbought"]) / (100 - p["overbought"]) + 0.5, 1.0)
+            reasoning = f"RSI at {current_rsi:.1f} — deep overbought (> {p['overbought']}). Pullback expected."
+        elif current_rsi > 50:
+            # Above 50 → lean SELL (mean reversion)
+            direction = SignalDirection.SELL
+            depth = (current_rsi - 50) / 20  # 0 at RSI=50, 1 at RSI=70
+            confidence = 0.10 + min(depth, 1.0) * 0.45
+            reasoning = f"RSI at {current_rsi:.1f} — above midline, leaning bearish for reversion."
+        else:
+            # Exactly 50 — truly neutral, still give a tiny signal based on momentum
+            rsi_slope = current_rsi - rsi.iloc[-2] if len(rsi.dropna()) >= 2 else 0
+            if rsi_slope > 0:
+                direction = SignalDirection.BUY
+                confidence = 0.10
+                reasoning = f"RSI at 50.0 but rising — slight bullish bias."
+            else:
+                direction = SignalDirection.SELL
+                confidence = 0.10
+                reasoning = f"RSI at 50.0 but falling — slight bearish bias."
 
         sl, tp = None, None
         if direction == SignalDirection.BUY and current_atr > 0:

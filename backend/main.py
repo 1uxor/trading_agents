@@ -16,6 +16,7 @@ import backend.models.anthropic_provider
 import backend.models.gemini_provider
 import backend.models.ollama_provider
 import backend.models.hf_forecaster
+import backend.models.hf_trading_models
 import backend.strategies.ma_crossover
 import backend.strategies.rsi_reversion
 import backend.strategies.breakout
@@ -37,11 +38,8 @@ async def lifespan(app: FastAPI):
     # Init DB
     await init_db()
 
-    # Create broker (paper by default)
     settings = get_settings()
 
-    from backend.broker.paper_broker import PaperBroker
-    from backend.market_data.paper_data import PaperDataProvider
     from backend.market_data.cache import CachedMarketData
     from backend.risk.manager import RiskManager
     from backend.logging_.trade_logger import TradeLogger
@@ -49,24 +47,42 @@ async def lifespan(app: FastAPI):
     from backend.api.ws import commentary_broadcast_callback
     from backend.api.dependencies import set_instances
 
-    broker = PaperBroker(initial_balance=10_000.0)
-    await broker.connect()
+    # ── Broker & market data: MT5 live or Paper fallback ──
+    use_mt5 = bool(settings.live_trading and settings.mt5_login and settings.mt5_password)
 
-    # Paper data provider with synthetic data
-    paper_data = PaperDataProvider()
-    paper_data.load_synthetic("EURUSD", bars=5000, start_price=1.1000)
-    paper_data.load_synthetic("GBPUSD", bars=5000, start_price=1.2700, seed=99)
-    paper_data.load_synthetic("USDJPY", bars=5000, start_price=149.50, volatility=0.05, seed=77)
+    if use_mt5:
+        from backend.broker.mt5_broker import MT5Broker
+        from backend.market_data.mt5_data import MT5DataProvider
 
-    # Set prices on paper broker
-    import pandas as pd
-    from backend.market_data.provider import Timeframe
-    for sym in ["EURUSD", "GBPUSD", "USDJPY"]:
-        df = await paper_data.get_ohlcv(sym, Timeframe.H1, 1)
-        price = df["close"].iloc[-1]
-        broker.set_price(sym, price)
+        logger.info("Connecting to MT5 (login=%s, server=%s)...", settings.mt5_login, settings.mt5_server)
+        broker = MT5Broker()
+        connected = await broker.connect()
+        if not connected:
+            raise RuntimeError("Failed to connect to MT5. Is MetaTrader 5 terminal running?")
 
-    market_data = CachedMarketData(paper_data, ttl_seconds=10)
+        market_data = CachedMarketData(MT5DataProvider(), ttl_seconds=5)
+        logger.info("MT5 connected — live demo trading mode")
+    else:
+        from backend.broker.paper_broker import PaperBroker
+        from backend.market_data.paper_data import PaperDataProvider
+        from backend.market_data.provider import Timeframe
+
+        logger.info("Starting in paper trading mode (set LIVE_TRADING=true for MT5)")
+        broker = PaperBroker(initial_balance=10_000.0)
+        await broker.connect()
+
+        paper_data = PaperDataProvider()
+        paper_data.load_synthetic("EURUSD", bars=5000, start_price=1.1000)
+        paper_data.load_synthetic("GBPUSD", bars=5000, start_price=1.2700, seed=99)
+        paper_data.load_synthetic("USDJPY", bars=5000, start_price=149.50, volatility=0.05, seed=77)
+
+        for sym in ["EURUSD", "GBPUSD", "USDJPY"]:
+            df = await paper_data.get_ohlcv(sym, Timeframe.H1, 1)
+            price = df["close"].iloc[-1]
+            broker.set_price(sym, price)
+
+        market_data = CachedMarketData(paper_data, ttl_seconds=10)
+
     risk_manager = RiskManager(broker)
     trade_logger = TradeLogger()
     runner = AgentRunner(
@@ -110,15 +126,63 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error("Failed to restore agent %s: %s", dba.id, e)
 
-    # Try to connect MT5 if credentials exist
-    if settings.mt5_login and settings.mt5_password and settings.live_trading:
-        logger.info("MT5 credentials found — but live trading requires UI confirmation")
+    logger.info("Platform ready (%s)", "MT5 live" if use_mt5 else "paper trading")
 
-    logger.info("Platform ready (paper trading mode)")
+    # ── Background task: sync closed trades from MT5 to local DB ──
+    import asyncio
+
+    async def _sync_closed_trades():
+        """Periodically check if MT5 positions were closed (by SL/TP/manual)
+        and update the local DB accordingly."""
+        from backend.database import DBTrade, get_session_factory
+        from sqlalchemy import select
+
+        while True:
+            await asyncio.sleep(10)
+            try:
+                open_positions = await broker.get_positions()
+                open_tickets = {p.ticket for p in open_positions}
+
+                factory = get_session_factory()
+                async with factory() as session:
+                    stmt = select(DBTrade).where(DBTrade.status == "open")
+                    result = await session.execute(stmt)
+                    db_open_trades = result.scalars().all()
+
+                    for t in db_open_trades:
+                        if t.broker_ticket and t.broker_ticket not in open_tickets:
+                            # Position was closed on MT5 — get exit info from MT5 history
+                            exit_price = None
+                            profit = 0.0
+                            try:
+                                import MetaTrader5 as mt5
+                                deals = mt5.history_deals_get(position=int(t.broker_ticket))
+                                if deals:
+                                    last_deal = deals[-1]
+                                    exit_price = last_deal.price
+                                    profit = last_deal.profit
+                            except Exception:
+                                pass
+
+                            await trade_logger.close_trade(
+                                broker_ticket=t.broker_ticket,
+                                exit_price=exit_price or 0.0,
+                                profit=profit,
+                            )
+                            logger.info(
+                                "Synced closed trade: ticket=%s profit=%.2f",
+                                t.broker_ticket, profit,
+                            )
+            except Exception as e:
+                logger.debug("Trade sync error: %s", e)
+
+    sync_task = asyncio.create_task(_sync_closed_trades()) if use_mt5 else None
 
     yield
 
     # Shutdown
+    if sync_task:
+        sync_task.cancel()
     logger.info("Shutting down...")
     for agent in runner.list_agents():
         agent.stop()

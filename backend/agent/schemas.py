@@ -10,7 +10,7 @@ from backend.strategies.combiner import CombineMode
 # Strategies that require an LLM provider (not hf_forecaster, not no_model)
 LLM_STRATEGIES = {"llm_discretionary"}
 # Valid LLM providers for llm_discretionary
-LLM_PROVIDERS = {"gemini", "openai", "anthropic", "ollama"}
+LLM_PROVIDERS = {"gemini", "openai", "anthropic", "ollama", "hf_trading_models"}
 
 
 class StrategyConfig(BaseModel):
@@ -53,8 +53,15 @@ class AgentConfig(BaseModel):
         if len(self.strategies) == 1 and self.combiner is not None:
             self.combiner = None
 
+        # Auto-fix: hf_trading_models outputs LLMSignal format (signal/confidence),
+        # NOT ForecastResult. Only llm_discretionary can consume it.
+        if self.model_provider == "hf_trading_models":
+            if "llm_discretionary" not in strategy_names:
+                self.strategies = [StrategyConfig(name="llm_discretionary")]
+                self.combiner = None
+
         # llm_discretionary requires an LLM provider
-        if strategy_names & LLM_STRATEGIES:
+        if {s.name for s in self.strategies} & LLM_STRATEGIES:
             if self.model_provider not in LLM_PROVIDERS:
                 raise ValueError(
                     f"Strategy llm_discretionary requires an LLM provider "

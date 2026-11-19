@@ -61,15 +61,33 @@ class BreakoutStrategy(Strategy):
         confidence = 0.0
 
         check_price = current_close if p["confirm_close"] else current_high
+        channel_width = prev_upper - prev_lower if (not pd.isna(prev_upper) and not pd.isna(prev_lower) and prev_upper > prev_lower) else 0
 
         if check_price > prev_upper and not pd.isna(prev_upper):
             direction = SignalDirection.BUY
-            confidence = 0.65
+            confidence = 0.80
             reasoning = f"Breakout above Donchian upper ({prev_upper:.5f}). Price: {current_close:.5f}"
         elif (current_close if p["confirm_close"] else current_low) < prev_lower and not pd.isna(prev_lower):
             direction = SignalDirection.SELL
-            confidence = 0.65
+            confidence = 0.80
             reasoning = f"Breakdown below Donchian lower ({prev_lower:.5f}). Price: {current_close:.5f}"
+        elif channel_width > 0 and not pd.isna(prev_upper) and not pd.isna(prev_lower):
+            # Positional signals: always signal based on where price sits in the channel
+            mid = (prev_upper + prev_lower) / 2
+            half_width = channel_width / 2
+
+            if current_close >= mid:
+                # Upper half → lean BUY (approaching upper band)
+                direction = SignalDirection.BUY
+                position = (current_close - mid) / half_width  # 0 at mid, 1 at upper band
+                confidence = 0.15 + position * 0.45  # 15% at mid, up to 60% near band
+                reasoning = f"Price in upper channel (pos={position:.0%}), leaning bullish. Price: {current_close:.5f}"
+            else:
+                # Lower half → lean SELL (approaching lower band)
+                direction = SignalDirection.SELL
+                position = (mid - current_close) / half_width  # 0 at mid, 1 at lower band
+                confidence = 0.15 + position * 0.45
+                reasoning = f"Price in lower channel (pos={position:.0%}), leaning bearish. Price: {current_close:.5f}"
 
         sl, tp = None, None
         if direction == SignalDirection.BUY and current_atr > 0:

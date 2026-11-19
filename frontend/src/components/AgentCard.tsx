@@ -7,9 +7,11 @@ interface Props {
   events: CommentaryEvent[];
   positions: Position[];
   onAction: (id: string, action: string) => void;
+  onDelete?: (id: string) => void;
+  compact?: boolean;
 }
 
-export function AgentCard({ agent, events, positions, onAction }: Props) {
+export function AgentCard({ agent, events, positions, onAction, onDelete, compact }: Props) {
   const lastEvent = events[events.length - 1];
   const [displayText, setDisplayText] = useState('');
   const textRef = useRef('');
@@ -45,20 +47,33 @@ export function AgentCard({ agent, events, positions, onAction }: Props) {
 
   return (
     <div
-      className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3 relative overflow-hidden"
+      className={`bg-gray-900 border border-gray-800 rounded-xl ${compact ? 'p-3 space-y-2' : 'p-4 space-y-3'} relative overflow-hidden`}
       style={{ borderLeftColor: agent.color, borderLeftWidth: 4 }}
     >
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className={`status-dot ${agent.state}`} />
-          <span className="font-semibold" style={{ color: agent.color }}>
+          <span className={`font-semibold ${compact ? 'text-sm' : ''}`} style={{ color: agent.color }}>
             {agent.name}
           </span>
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
           {agent.state === 'stopped' && (
-            <ActionBtn label="Start" onClick={() => onAction(agent.id, 'start')} />
+            <>
+              <ActionBtn label="Start" onClick={() => onAction(agent.id, 'start')} />
+              {onDelete && (
+                <ActionBtn
+                  label="Delete"
+                  variant="danger"
+                  onClick={() => {
+                    if (confirm(`Delete agent "${agent.name}"? This cannot be undone.`)) {
+                      onDelete(agent.id);
+                    }
+                  }}
+                />
+              )}
+            </>
           )}
           {agent.state === 'running' && (
             <>
@@ -86,7 +101,7 @@ export function AgentCard({ agent, events, positions, onAction }: Props) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {lastEvent && (
-            <ConfidenceMeter value={lastEvent.confidence ?? 0} color={agent.color} size={36} />
+            <ConfidenceMeter value={lastEvent.confidence ?? 0} color={agent.color} size={compact ? 28 : 36} />
           )}
           <div className="text-xs text-gray-500">
             {positions.length} pos | P&L:{' '}
@@ -96,22 +111,24 @@ export function AgentCard({ agent, events, positions, onAction }: Props) {
           </div>
         </div>
         {lastEvent && (
-          <span className="text-lg">{eventIcon[lastEvent.event] || ''}</span>
+          <span className={compact ? 'text-sm' : 'text-lg'}>{eventIcon[lastEvent.event] || ''}</span>
         )}
       </div>
 
-      {/* Commentary bubble */}
-      <div className="bg-gray-800/50 rounded-lg p-3 min-h-[48px]">
-        {displayText ? (
-          <p className="text-sm text-gray-300 font-mono leading-relaxed">
-            <span className="text-gray-500 mr-1">&gt;</span>
-            {displayText}
-            <span className="animate-pulse ml-0.5 text-gray-500">|</span>
-          </p>
-        ) : (
-          <p className="text-sm text-gray-600 italic">Waiting for activity...</p>
-        )}
-      </div>
+      {/* Commentary bubble — hidden in compact mode */}
+      {!compact && (
+        <div className="bg-gray-800/50 rounded-lg p-3 min-h-[48px]">
+          {displayText ? (
+            <p className="text-sm text-gray-300 font-mono leading-relaxed">
+              <span className="text-gray-500 mr-1">&gt;</span>
+              {displayText}
+              <span className="animate-pulse ml-0.5 text-gray-500">|</span>
+            </p>
+          ) : (
+            <p className="text-sm text-gray-600 italic">Waiting for activity...</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -69,24 +69,31 @@ export function Chart({ symbol, agents, events }: Props) {
 
       seriesRef.current = series;
 
-      // Fetch data
-      try {
-        const { data } = await api.getOHLCV(symbol, 'H1', 200);
-        if (cancelled) return;
+      // Fetch data and set up auto-refresh
+      async function fetchCandles(fitContent = false) {
+        try {
+          const { data } = await api.getOHLCV(symbol, 'H1', 200);
+          if (cancelled) return;
 
-        const candles = data.map((bar: any) => ({
-          time: bar.time as number,
-          open: bar.open,
-          high: bar.high,
-          low: bar.low,
-          close: bar.close,
-        }));
+          const candles = data.map((bar: any) => ({
+            time: bar.time as any,
+            open: bar.open,
+            high: bar.high,
+            low: bar.low,
+            close: bar.close,
+          }));
 
-        series.setData(candles);
-        chart.timeScale().fitContent();
-      } catch (e) {
-        console.error('Chart data error:', e);
+          series.setData(candles);
+          if (fitContent) chart.timeScale().fitContent();
+        } catch (e) {
+          console.error('Chart data error:', e);
+        }
       }
+
+      await fetchCandles(true);
+
+      // Auto-refresh every 10 seconds
+      const refreshInterval = setInterval(() => fetchCandles(false), 10_000);
 
       // Resize observer
       const ro = new ResizeObserver(() => {
@@ -99,6 +106,7 @@ export function Chart({ symbol, agents, events }: Props) {
       setLoading(false);
 
       return () => {
+        clearInterval(refreshInterval);
         ro.disconnect();
         chart.remove();
       };

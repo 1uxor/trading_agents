@@ -128,3 +128,42 @@ export interface OHLCVBar {
   close: number;
   volume: number;
 }
+
+export interface TradeRecord {
+  id: number;
+  symbol: string;
+  direction: 'BUY' | 'SELL';
+  lot_size: number;
+  entry_price: number | null;
+  exit_price: number | null;
+  sl: number | null;
+  tp: number | null;
+  profit: number | null;
+  status: 'open' | 'closed' | 'cancelled';
+  opened_at: string | null;
+  closed_at: string | null;
+  broker_ticket: string | null;
+}
+
+export interface SignalRecord {
+  id: number;
+  timestamp: string | null;
+  symbol: string;
+  strategy_name: string;
+  signal: 'BUY' | 'SELL' | 'HOLD';
+  confidence: number | null;
+  reasoning: string | null;
+  risk_check_result: string | null;
+  risk_check_reason: string | null;
+  order_result: string | null;
+}
+
+export interface IndicatorSeries {
+  strategy: string;
+  type: 'line' | 'rsi' | 'forecast_placeholder';
+  label: string;
+  color: string;
+  oversold?: number;
+  overbought?: number;
+  data: { time: number; value: number }[];
+}

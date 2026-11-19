@@ -61,14 +61,23 @@ class MACrossoverStrategy(Strategy):
         direction = SignalDirection.HOLD
         reasoning = f"Fast MA({fast})={curr_fast:.5f}, Slow MA({slow})={curr_slow:.5f}"
 
-        # Bullish crossover
+        # Bullish crossover (strong signal)
         if prev_fast <= prev_slow and curr_fast > curr_slow:
             direction = SignalDirection.BUY
             reasoning = f"Bullish crossover: Fast MA({fast}) crossed above Slow MA({slow})"
-        # Bearish crossover
+        # Bearish crossover (strong signal)
         elif prev_fast >= prev_slow and curr_fast < curr_slow:
             direction = SignalDirection.SELL
             reasoning = f"Bearish crossover: Fast MA({fast}) crossed below Slow MA({slow})"
+        # Trend-following: signal based on MA positioning even without crossover
+        elif curr_fast > curr_slow:
+            direction = SignalDirection.BUY
+            spread_pct = (curr_fast - curr_slow) / curr_slow * 100
+            reasoning = f"Trend: Fast MA({fast}) above Slow MA({slow}), spread={spread_pct:.4f}%"
+        elif curr_fast < curr_slow:
+            direction = SignalDirection.SELL
+            spread_pct = (curr_slow - curr_fast) / curr_slow * 100
+            reasoning = f"Trend: Fast MA({fast}) below Slow MA({slow}), spread={spread_pct:.4f}%"
 
         sl = None
         tp = None
@@ -79,7 +88,15 @@ class MACrossoverStrategy(Strategy):
             sl = price + current_atr * p["atr_sl_mult"]
             tp = price - current_atr * p["atr_tp_mult"]
 
-        confidence = 0.6 if direction != SignalDirection.HOLD else 0.0
+        if direction != SignalDirection.HOLD:
+            # Crossover gets high confidence; trend-following gets graduated confidence based on spread
+            if "crossover" in reasoning.lower():
+                confidence = 0.75
+            else:
+                spread_pct = abs(curr_fast - curr_slow) / curr_slow * 100
+                confidence = min(spread_pct / 0.15, 0.50)  # Max 0.50 for trend-following
+        else:
+            confidence = 0.0
 
         return Signal(
             direction=direction,
@@ -96,7 +113,11 @@ class MACrossoverStrategy(Strategy):
             p.update(params)
 
         if signal.direction == SignalDirection.BUY:
-            return f"The {p['fast_period']}-period MA just punched above the {p['slow_period']}-period MA — that's a bullish crossover. I'm going long."
+            if "crossover" in (signal.reasoning or "").lower():
+                return f"The {p['fast_period']}-period MA just punched above the {p['slow_period']}-period MA — that's a bullish crossover. I'm going long."
+            return f"The {p['fast_period']}-period MA is above the {p['slow_period']}-period MA — trend is bullish. Riding the trend long."
         elif signal.direction == SignalDirection.SELL:
-            return f"The {p['fast_period']}-period MA dropped below the {p['slow_period']}-period MA — bearish crossover. Flipping short."
+            if "crossover" in (signal.reasoning or "").lower():
+                return f"The {p['fast_period']}-period MA dropped below the {p['slow_period']}-period MA — bearish crossover. Flipping short."
+            return f"The {p['fast_period']}-period MA is below the {p['slow_period']}-period MA — trend is bearish. Riding the trend short."
         return f"MAs are flat — {p['fast_period']}-MA and {p['slow_period']}-MA haven't crossed. Sitting tight."

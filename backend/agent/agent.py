@@ -406,7 +406,8 @@ class Agent:
             raw_conf = model_output.get("confidence", 0)
             raw_reasoning = model_output.get("reasoning", "")
             provider = self.config.model_provider
-            model_name = (self.config.model_config_ or {}).get("model", "default")
+            cfg_ = self.config.model_config_ or {}
+            model_name = cfg_.get("model", cfg_.get("model_id", "default"))
             return (
                 f"llm_discretionary | provider={provider} model={model_name} | "
                 f"LLM output: signal={raw_signal} conf={raw_conf:.0%} | "

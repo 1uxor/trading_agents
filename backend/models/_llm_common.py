@@ -57,6 +57,7 @@ Last 10 candles: {json.dumps(last_candles)}"""
 def parse_llm_response(text: str) -> dict:
     """Parse LLM response text into a validated signal dict. Returns HOLD on failure."""
     text = text.strip()
+
     # Try to extract JSON from possible markdown code block
     if "```" in text:
         parts = text.split("```")
@@ -68,10 +69,48 @@ def parse_llm_response(text: str) -> dict:
                 text = part
                 break
 
+    # Try direct JSON parse first
     try:
         raw = json.loads(text)
         signal = LLMSignal(**raw)
         return signal.model_dump()
-    except Exception as e:
-        logger.warning("Failed to parse LLM response: %s — treating as HOLD", e)
-        return LLMSignal(signal="HOLD", reasoning=f"Parse error: {e}").model_dump()
+    except Exception:
+        pass
+
+    # Try to find JSON object anywhere in the text
+    import re
+    json_match = re.search(r'\{[^{}]*"signal"\s*:\s*"[^"]*"[^{}]*\}', text, re.DOTALL)
+    if json_match:
+        try:
+            raw = json.loads(json_match.group())
+            signal = LLMSignal(**raw)
+            return signal.model_dump()
+        except Exception:
+            pass
+
+    # Try to extract signal from free-form text
+    text_upper = text.upper()
+    signal_dir = "HOLD"
+    confidence = 0.3
+    reasoning = text[:200] if text else "No response"
+
+    if any(w in text_upper for w in ["STRONG BUY", "BULLISH", "RECOMMEND BUY", "GO LONG"]):
+        signal_dir = "BUY"
+        confidence = 0.5
+    elif any(w in text_upper for w in ["STRONG SELL", "BEARISH", "RECOMMEND SELL", "GO SHORT"]):
+        signal_dir = "SELL"
+        confidence = 0.5
+    elif " BUY" in text_upper or text_upper.startswith("BUY"):
+        signal_dir = "BUY"
+        confidence = 0.35
+    elif " SELL" in text_upper or text_upper.startswith("SELL"):
+        signal_dir = "SELL"
+        confidence = 0.35
+
+    if signal_dir != "HOLD":
+        logger.info("Extracted signal %s from free-form LLM text", signal_dir)
+
+    return LLMSignal(
+        signal=signal_dir, confidence=confidence,
+        reasoning=f"[parsed from text] {reasoning}"
+    ).model_dump()

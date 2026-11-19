@@ -6,15 +6,18 @@ import { WarRoom } from './components/WarRoom';
 import { AgentForm } from './components/AgentForm';
 import { BacktestView } from './components/BacktestView';
 import { TradeLog } from './components/TradeLog';
+import { Leaderboard } from './components/Leaderboard';
+import { StrategyPresets } from './components/StrategyPresets';
 import type { AgentSummary, AccountInfo, Position, CommentaryEvent } from './types';
 
-type Page = 'dashboard' | 'warroom' | 'create' | 'backtest' | 'logs';
+type Page = 'dashboard' | 'warroom' | 'create' | 'backtest' | 'logs' | 'leaderboard' | 'presets';
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard');
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const { events, connected } = useWebSocket();
 
   const refresh = async () => {
@@ -50,9 +53,17 @@ export default function App() {
     refresh();
   };
 
+  const handleDeleteAgent = async (id: string) => {
+    await api.deleteAgent(id);
+    if (selectedAgentId === id) setSelectedAgentId(null);
+    refresh();
+  };
+
   const navItems: { key: Page; label: string }[] = [
     { key: 'dashboard', label: 'Dashboard' },
     { key: 'warroom', label: 'War Room' },
+    { key: 'leaderboard', label: 'Leaderboard' },
+    { key: 'presets', label: 'Presets' },
     { key: 'create', label: 'New Agent' },
     { key: 'backtest', label: 'Backtest' },
     { key: 'logs', label: 'Trade Log' },
@@ -76,7 +87,7 @@ export default function App() {
             {navItems.map((item) => (
               <button
                 key={item.key}
-                onClick={() => setPage(item.key)}
+                onClick={() => { setPage(item.key); if (item.key !== 'dashboard') setSelectedAgentId(null); }}
                 className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
                   page === item.key
                     ? 'bg-blue-500/20 text-blue-400'
@@ -98,7 +109,7 @@ export default function App() {
       </header>
 
       {/* Main */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      <main className={`mx-auto px-4 py-6 ${selectedAgentId ? 'max-w-[1400px]' : 'max-w-7xl'}`}>
         {page === 'dashboard' && (
           <Dashboard
             agents={agents}
@@ -106,7 +117,10 @@ export default function App() {
             positions={positions}
             events={events}
             onAction={async (id, action) => { await api.agentAction(id, action); refresh(); }}
+            onDelete={handleDeleteAgent}
             onNavigate={setPage}
+            selectedAgentId={selectedAgentId}
+            onSelectAgent={setSelectedAgentId}
           />
         )}
         {page === 'warroom' && (
@@ -115,6 +129,8 @@ export default function App() {
         {page === 'create' && (
           <AgentForm onCreated={() => { refresh(); setPage('dashboard'); }} />
         )}
+        {page === 'leaderboard' && <Leaderboard />}
+        {page === 'presets' && <StrategyPresets onNavigate={(p) => { setPage(p as Page); refresh(); }} />}
         {page === 'backtest' && <BacktestView />}
         {page === 'logs' && <TradeLog events={events} />}
       </main>

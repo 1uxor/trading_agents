@@ -21,6 +21,14 @@ export const api = {
     request<any>(`/api/agents/${id}/action`, { method: 'POST', body: JSON.stringify({ action }) }),
   deleteAgent: (id: string) => request<any>(`/api/agents/${id}`, { method: 'DELETE' }),
   getCommentary: (id: string) => request<any[]>(`/api/agents/${id}/commentary`),
+  getAgentTrades: (id: string, limit = 100) =>
+    request<any[]>(`/api/agents/${id}/trades?limit=${limit}`),
+  getAgentSignals: (id: string, limit = 100) =>
+    request<any[]>(`/api/agents/${id}/signals?limit=${limit}`),
+  getAgentIndicators: (id: string, symbol: string, timeframe: string, count = 200) =>
+    request<any>(`/api/agents/${id}/indicators?symbol=${symbol}&timeframe=${timeframe}&count=${count}`),
+
+  getLeaderboard: () => request<any[]>('/api/agents/leaderboard'),
 
   // Market
   getSymbols: () => request<{ symbols: string[] }>('/api/market/symbols'),

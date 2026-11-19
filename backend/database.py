@@ -106,7 +106,12 @@ _session_factory = None
 def get_engine():
     global _engine
     if _engine is None:
-        _engine = create_async_engine(get_settings().database_url, echo=False)
+        _engine = create_async_engine(
+            get_settings().database_url,
+            echo=False,
+            connect_args={"timeout": 30},
+            pool_pre_ping=True,
+        )
     return _engine
 
 

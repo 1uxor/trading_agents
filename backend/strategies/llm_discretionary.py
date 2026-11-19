@@ -17,7 +17,7 @@ class LLMDiscretionaryStrategy(Strategy):
     @classmethod
     def parameters(cls) -> list[ParameterSpec]:
         return [
-            ParameterSpec(name="min_confidence", label="Min Confidence to Trade", type="float", default=0.5, min=0.0, max=1.0, step=0.05),
+            ParameterSpec(name="min_confidence", label="Min Confidence to Trade", type="float", default=0.15, min=0.0, max=1.0, step=0.05),
         ]
 
     def generate_signal(

@@ -17,8 +17,8 @@ class ForecastDrivenStrategy(Strategy):
     @classmethod
     def parameters(cls) -> list[ParameterSpec]:
         return [
-            ParameterSpec(name="return_threshold", label="Min Forecast Return (%)", type="float", default=0.1, min=0.01, max=5.0, step=0.01),
-            ParameterSpec(name="quantile_agreement", label="Require Quantile Agreement", type="bool", default=True),
+            ParameterSpec(name="return_threshold", label="Min Forecast Return (%)", type="float", default=0.005, min=0.001, max=5.0, step=0.001),
+            ParameterSpec(name="quantile_agreement", label="Require Quantile Agreement", type="bool", default=False),
             ParameterSpec(name="atr_sl_mult", label="ATR SL Multiplier", type="float", default=1.5, min=0.5, max=5.0, step=0.1),
             ParameterSpec(name="atr_tp_mult", label="ATR TP Multiplier", type="float", default=2.5, min=0.5, max=10.0, step=0.1),
         ]
