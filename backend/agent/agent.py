@@ -289,7 +289,7 @@ class Agent:
             lot_size=self.config.risk_profile.max_lot_size,
             sl=signal.sl,
             tp=signal.tp,
-            comment=f"{self.name}|{self._strategy_label()}",
+            comment=f"{self.id[:8]}",
             agent_id=self.id,
         )
 

@@ -123,20 +123,23 @@ class MT5Broker(BrokerAdapter):
         price = tick.ask if order.direction == Direction.BUY else tick.bid
         order_type = mt5.ORDER_TYPE_BUY if order.direction == Direction.BUY else mt5.ORDER_TYPE_SELL
 
+        # MT5 Python lib is strict about types — cast everything explicitly
+        comment = str(order.comment or "")[:31]
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": order.symbol,
-            "volume": order.lot_size,
+            "symbol": str(order.symbol),
+            "volume": float(order.lot_size),
             "type": order_type,
-            "price": price,
-            "sl": order.sl,
-            "tp": order.tp if order.tp else 0.0,
+            "price": float(price),
+            "sl": float(order.sl),
+            "tp": float(order.tp) if order.tp else 0.0,
             "deviation": 20,
             "magic": 234000,
-            "comment": order.comment[:31],  # MT5 comment limit
+            "comment": comment,
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": self._get_filling_mode(order.symbol),
         }
+        logger.info("MT5 order_send request: %s", request)
 
         result = mt5.order_send(request)
         if result is None:
