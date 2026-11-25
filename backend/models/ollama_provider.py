@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 class OllamaProvider(ModelProvider):
     name = "ollama"
     available_models = [
+        {"id": "tinyllama", "label": "TinyLlama (1.1B)"},
         {"id": "llama3.1", "label": "Llama 3.1"},
         {"id": "llama3.2", "label": "Llama 3.2"},
         {"id": "mistral", "label": "Mistral"},
