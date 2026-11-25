@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useWebSocket } from './api/useWebSocket';
 import { api } from './api/client';
 import { Dashboard } from './components/Dashboard';
@@ -19,8 +19,12 @@ export default function App() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const { events, connected } = useWebSocket();
+  const refreshing = useRef(false);
+  const lastResultTs = useRef('');
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
+    if (refreshing.current) return;
+    refreshing.current = true;
     try {
       const [a, acc, pos] = await Promise.all([
         api.listAgents(),
@@ -32,20 +36,28 @@ export default function App() {
       setPositions(pos);
     } catch (e) {
       console.error('Refresh failed:', e);
+    } finally {
+      refreshing.current = false;
     }
-  };
+  }, []);
 
   useEffect(() => {
     refresh();
     const interval = setInterval(refresh, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [refresh]);
 
-  // Refresh when we get trade results
+  // Refresh when we get trade results (debounced via ref to avoid cascading)
   useEffect(() => {
     const lastEvent = events[events.length - 1];
-    if (lastEvent?.event === 'result') refresh();
-  }, [events]);
+    if (
+      lastEvent?.event === 'result' &&
+      lastEvent.timestamp !== lastResultTs.current
+    ) {
+      lastResultTs.current = lastEvent.timestamp;
+      refresh();
+    }
+  }, [events, refresh]);
 
   const handleKillSwitch = async () => {
     if (!confirm('KILL SWITCH: This will close ALL positions and stop ALL agents. Continue?')) return;
@@ -129,7 +141,13 @@ export default function App() {
         {page === 'create' && (
           <AgentForm onCreated={() => { refresh(); setPage('dashboard'); }} />
         )}
-        {page === 'leaderboard' && <Leaderboard />}
+        {page === 'leaderboard' && (
+          <Leaderboard
+            agents={agents}
+            onAction={async (id, action) => { await api.agentAction(id, action); refresh(); }}
+            onDelete={handleDeleteAgent}
+          />
+        )}
         {page === 'presets' && <StrategyPresets onNavigate={(p) => { setPage(p as Page); refresh(); }} />}
         {page === 'backtest' && <BacktestView />}
         {page === 'logs' && <TradeLog events={events} />}

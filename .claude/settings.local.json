@@ -42,7 +42,8 @@
       "Bash(cd \"/c/my things/trading_agents\" && .venv/Scripts/python -c \"\nimport MetaTrader5 as mt5\nmt5.initialize\\(r'C:\\\\Program Files\\\\MetaTrader 5\\\\terminal64.exe', login=115651133, password='Zn@4DsCt', server='MetaQuotes-Demo'\\)\ninfo = mt5.symbol_info\\('EURUSD'\\)\nprint\\(f'filling_mode: {info.filling_mode}'\\)\nprint\\(f'ORDER_FILLING_FOK={mt5.ORDER_FILLING_FOK}'\\)\nprint\\(f'ORDER_FILLING_IOC={mt5.ORDER_FILLING_IOC}'\\)\nprint\\(f'ORDER_FILLING_RETURN={mt5.ORDER_FILLING_RETURN}'\\)\nmt5.shutdown\\(\\)\n\" 2>&1)",
       "Bash(cd \"/c/my things/trading_agents\" && .venv/Scripts/python -c \"\nimport MetaTrader5 as mt5\nmt5.initialize\\(r'C:\\\\Program Files\\\\MetaTrader 5\\\\terminal64.exe', login=115651133, password='Zn@4DsCt', server='MetaQuotes-Demo'\\)\npositions = mt5.positions_get\\(\\)\nif positions:\n    for p in positions:\n        print\\(f'Ticket={p.ticket} | {p.symbol} | {\\\\\"BUY\\\\\" if p.type==0 else \\\\\"SELL\\\\\"} | {p.volume} lots | entry={p.price_open:.5f} | current={p.price_current:.5f} | P&L={p.profit:.2f} | comment={p.comment}'\\)\nelse:\n    print\\('No open positions'\\)\nprint\\(f'Total: {len\\(positions or []\\)} positions'\\)\nmt5.shutdown\\(\\)\n\" 2>&1)",
       "Bash(cd \"/c/my things/trading_agents\" && .venv/Scripts/python -c \"from backend.main import app; print\\('OK'\\)\" 2>&1)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }
